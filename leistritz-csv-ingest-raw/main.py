@@ -134,7 +134,7 @@ def parse_csv_to_long_rows(file_bytes, source_file):
             ) from exc
 
         for col_index in active_columns:
-            if col_index in [1, 2]:
+            if col_index in [0, 1, 2]:
                 continue
 
             if col_index >= len(row):
