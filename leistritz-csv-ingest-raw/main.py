@@ -187,7 +187,9 @@ def load_rows_to_bigquery(rows):
     return len(dataframe)
 
 
-def ingest_csv(event, context):
+def ingest_csv(cloud_event):
+    event = cloud_event.data
+
     bucket_name = event["bucket"]
     file_name = event["name"]
 
