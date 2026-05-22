@@ -176,6 +176,10 @@ def load_rows_to_bigquery(rows):
     dataframe["processed_at"] = pd.to_datetime(dataframe["processed_at"], utc=True)
     dataframe["machine_timestamp"] = pd.to_datetime(dataframe["machine_timestamp"], utc=True)
     dataframe["source_date"] = pd.to_datetime(dataframe["source_date"]).dt.date
+    dataframe["source_time"] = pd.to_datetime(
+        dataframe["source_time"],
+        format="%H:%M:%S"
+    ).dt.time    
 
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND
