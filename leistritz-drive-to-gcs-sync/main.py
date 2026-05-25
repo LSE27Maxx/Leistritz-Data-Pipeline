@@ -46,16 +46,25 @@ def sync_drive_to_gcs(request):
         "and mimeType != 'application/vnd.google-apps.folder'"
     )
 
-    results = drive_service.files().list(
-        q=query,
-        fields="files(id, name, mimeType, modifiedTime)",
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-    ).execute()
-
-    files = results.get("files", [])
     copied = []
     skipped = []
+    files = []
+
+    page_token = None
+    while True:
+        results = drive_service.files().list(
+            q=query,
+            fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+            pageToken=page_token,
+        ).execute()
+
+        files.extend(results.get("files", []))
+        page_token = results.get("nextPageToken")
+
+        if not page_token:
+            break
 
     for file in files:
         file_id = file["id"]
