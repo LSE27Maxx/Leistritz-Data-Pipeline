@@ -1,0 +1,2 @@
+web: functions-framework --target=sync_drive_to_gcs --signature-type=http --port=$PORT
+
