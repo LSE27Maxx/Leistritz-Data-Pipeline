@@ -196,14 +196,6 @@ def ingest_csv(event, context):
     file_name = event["name"]
 
     if not file_name.startswith(WATCH_PREFIX):
-        write_bq_log(
-            file_name,
-            "IGNORED_OUTSIDE_WATCH_FOLDER",
-            0,
-            "",
-            "",
-            ""
-        )
         return
 
     if file_name.endswith("/"):
