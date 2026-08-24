@@ -66,3 +66,60 @@ Drive folder (DRIVE_FOLDER_ID)
 - `already_processed`'s check-then-act isn't transactional — don't assume duplicate protection is airtight under concurrent triggers.
 - `SUCCESS` rows in `ingestion_file_log` are not a guarantee the corresponding rows still exist in `process_parameters_long_raw` today — the log reflects the load job's outcome at ingest time only; anything that later modifies the raw table (manual reload, deletion) isn't reflected back into the log.
 - Error categorization in `ingest_csv`'s except block is string-matching on the exception message, not on exception type — new failure modes will fall into `unknown-error` unless the matched keywords happen to appear.
+
+## Session protocol — progress persistence
+
+This section is an instruction to Claude Code, not a note for the human.
+
+**At the START of every session, before anything else:**
+
+1. Read the "Current state" and "Step log" sections below. State the last
+   completed step number and the next action back to me, then wait.
+2. Run `gcloud config get-value project` and confirm it returns
+   `notpla-machine-data`. If not, run `gcloud config set project notpla-machine-data`.
+3. Run `git status` and report anything uncommitted before adding to it.
+
+**After EVERY completed step, without being asked:**
+
+1. Append one line to the "Step log" below, newest last:
+   `- Step <n> — <what was done> — <outcome> — <YYYY-MM-DD>`
+2. Rewrite the "Current state" block: last step, what is in progress,
+   next action, anything left in a half-finished state.
+3. Commit and push:
+   `git add CLAUDE.md && git commit -m "Step <n>: <summary>" && git push`
+4. Confirm the push actually succeeded. If it fails, say so immediately
+   and stop — do not continue to the next step on an unpushed log.
+
+**Never batch these updates to the end of a session.** If the session ends
+unexpectedly — Cloud Shell disconnect, credit exhaustion, context limit —
+anything uncommitted is lost from the record.
+
+**If you are approaching a context or usage limit,** stop what you are doing,
+write the state update, commit and push it, and tell me where we are before
+continuing with anything else.
+
+**If a step is abandoned rather than completed,** log it as abandoned with the
+reason. A gap in the numbering is worse than a recorded dead end.
+
+---
+
+## Current state
+
+- **Last completed step:** Step 134 (see step log below).
+- **In progress:**
+  - Step 128b — the Looker Studio overlay chart (`elapsed_seconds_from_file_start` x-axis, `source_file_name` breakdown) is configured but not yet visually confirmed to render correctly.
+  - Step 131 — data discrepancy: `PR1216-retest-7.csv` and `PR1216-retest-8.csv` are logged `SUCCESS` (88,050 rows each) in `ingestion_file_log`, but `process_parameters_long_raw` has zero rows for either. Code trace of `ingest_csv` in `leistritz-csv-ingest-raw/main.py` ruled out a log-before-load-confirmed bug (the BQ load is synchronous and blocks before the success log is written). Root cause not yet confirmed.
+- **Next action:** Get visual confirmation from Callum that the Step 128b Looker chart renders correctly. Separately, check BigQuery job history / audit logs for DELETE or table-recreate operations against `process_parameters_long_raw` around 2026-05-22–2026-05-25 to explain the Step 131 discrepancy.
+- **Half-finished / open threads:** Both items above are open — neither is blocking the other.
+
+---
+
+## Step log
+
+- Step 128b — Looker overlay chart configured, not yet visually confirmed — in progress — 2026-08-19
+- Step 129 — Added `.gitignore` for `__pycache__/`/`*.pyc` and untracked the two `.pyc` files already committed to git (in `leistritz-csv-ingest-raw` and `leistritz-drive-to-gcs-sync`) — done — 2026-08-24
+- Step 130 — Resolved Step 122 (Drive sync pagination): the local pagination fix had been committed (`b720d73`) but the deployed Cloud Run service was still running the pre-fix build. Redeployed `leistritz-drive-to-gcs-sync` from current repo source via `gcloud run deploy` (revision `leistritz-drive-to-gcs-sync-00003-r5w`); confirmed the newly deployed source matches the repo exactly — done — 2026-08-24
+- Step 131 — Investigated `ingestion_file_log` vs `process_parameters_long_raw`: found `PR1216-retest-7.csv` and `PR1216-retest-8.csv` logged `SUCCESS` with 88,050 rows each but absent from the raw table entirely. Traced `ingest_csv`'s control flow; the BQ load is synchronous and blocks before the `SUCCESS` log write, which rules out a log-before-confirm bug in the current code. Root cause is most likely external to the ingest function (manual reload/truncate, or intentional purge of "retest" data) — paused, unconfirmed — 2026-08-24
+- Step 132 — Created `CLAUDE.md` documenting project architecture, deploy commands, GCS-prefix state machine, BigQuery layout, and known gaps — done — 2026-08-24
+- Step 133 — Added `docs/chatgpt-handover.md` and `docs/session-summary-2026-08-19.md`, converted from user-supplied PDF handover documents — done — 2026-08-24
+- Step 134 — Installed this session protocol (Session protocol, Current state, Step log sections) into `CLAUDE.md`, backfilling steps 129–133 for this session's prior uncommitted-to-log work — done — 2026-08-24
