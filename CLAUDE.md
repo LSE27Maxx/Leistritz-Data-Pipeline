@@ -105,7 +105,7 @@ reason. A gap in the numbering is worse than a recorded dead end.
 
 ## Current state
 
-- **Last completed step:** Step 134 (see step log below).
+- **Last completed step:** Step 135 (see step log below).
 - **In progress:**
   - Step 128b — the Looker Studio overlay chart (`elapsed_seconds_from_file_start` x-axis, `source_file_name` breakdown) is configured but not yet visually confirmed to render correctly.
   - Step 131 — data discrepancy: `PR1216-retest-7.csv` and `PR1216-retest-8.csv` are logged `SUCCESS` (88,050 rows each) in `ingestion_file_log`, but `process_parameters_long_raw` has zero rows for either. Code trace of `ingest_csv` in `leistritz-csv-ingest-raw/main.py` ruled out a log-before-load-confirmed bug (the BQ load is synchronous and blocks before the success log is written). Root cause not yet confirmed.
@@ -123,3 +123,4 @@ reason. A gap in the numbering is worse than a recorded dead end.
 - Step 132 — Created `CLAUDE.md` documenting project architecture, deploy commands, GCS-prefix state machine, BigQuery layout, and known gaps — done — 2026-08-24
 - Step 133 — Added `docs/chatgpt-handover.md` and `docs/session-summary-2026-08-19.md`, converted from user-supplied PDF handover documents — done — 2026-08-24
 - Step 134 — Installed this session protocol (Session protocol, Current state, Step log sections) into `CLAUDE.md`, backfilling steps 129–133 for this session's prior uncommitted-to-log work — done — 2026-08-24
+- Step 135 — Simulated a fresh session start per protocol: confirmed `gcloud config get-value project` returns `notpla-machine-data` and `git status` is clean with no uncommitted changes — done — 2026-08-24
