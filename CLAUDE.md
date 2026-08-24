@@ -11,6 +11,35 @@ A two-stage GCP data pipeline that gets process-parameter CSV exports from the L
 
 There is no shared code, build system, or test suite between the two services — each is a standalone deployable with its own `main.py` and `requirements.txt`.
 
+## Source documents and precedence
+
+Three documents describe this project's history and setup, all in `docs/`:
+
+- `docs/chatgpt-handover.md` — earliest handover doc; project objective, architecture overview, step history through ~Step 121, technical-debt checklist.
+- `docs/session-summary-2026-08-19.md` — narrower summary of Steps 123–128b (adding the run-relative field to the reporting view, building the Looker overlay chart).
+- `docs/claude-code-setup-leistritz.md` — written 2026-08-24 by a colleague (Peter) after directly auditing the deployed state rather than just reading the prior two docs. **This is the most authoritative of the three where they conflict**, because it was verified against live GCP resources.
+
+**Resolved conflict:** the ChatGPT handover recommends naming the run-relative field `run_elapsed_seconds`. That name was never adopted. The actual deployed field — confirmed directly against the live `process_parameters_long_reporting` view — is `elapsed_seconds_from_file_start`. Use that name; see the BigQuery layout section below.
+
+**On the old step-numbered plan (Steps 1–128b and onward):** treat the sequential step numbering and the "Current state"/"Step log" mechanism below as a *traceability discipline*, not a fixed script to execute in order. Picking up the log after Step 128b doesn't mean the Looker-chart-confirmation is mandatorily next — what to work on is driven by the priority order below and by what's actually asked for in a given session.
+
+**Priority order** — settled, don't reorder without being asked:
+1. Reliable ingestion
+2. Reliable reporting data model
+3. Useful Looker dashboard
+4. Multi-run comparison
+5. Automated Drive synchronisation
+6. Production hardening
+
+## Working practices
+
+(from `docs/claude-code-setup-leistritz.md`, Part 4)
+
+- **Permissions:** reading files, `git status`/`git log`, `gcloud ... describe`, `bq show`, and any `SELECT`-only query are safe to run freely. Anything containing `DELETE`, `DROP`, `CREATE OR REPLACE VIEW`, `gsutil rm`, `gsutil mv`, `bq load`, `gcloud functions deploy`, or `gcloud run deploy` needs care. **Bucket versioning on `gs://notpla-machine-data` is Suspended** — a `gsutil rm` is permanent and unrecoverable.
+- **Snapshot before changing a table:** `bq cp -n <table> <table>_presnap_YYYYMMDD` before any statement that modifies `process_parameters_long_raw` or another table. Views are cheap to recreate; tables are not.
+- **Verify deploys actually took effect** — check the logs for a distinctive string from the new code after any deploy, rather than assuming it landed.
+- **Test the failure path, not just the success path** — upload a deliberately malformed CSV, confirm the log records the right `error_category`, the file moves to `failed-processing`, and the raw table's row count is unchanged, then delete the test file. Not yet done on this pipeline as of 2026-08-24.
+
 ## Deployment
 
 Both services deploy from source (Buildpacks), not from a Dockerfile or CI pipeline — there's no CI config in this repo. Redeploys are done directly against project `notpla-machine-data`.
@@ -66,6 +95,9 @@ Drive folder (DRIVE_FOLDER_ID)
 - `already_processed`'s check-then-act isn't transactional — don't assume duplicate protection is airtight under concurrent triggers.
 - `SUCCESS` rows in `ingestion_file_log` are not a guarantee the corresponding rows still exist in `process_parameters_long_raw` today — the log reflects the load job's outcome at ingest time only; anything that later modifies the raw table (manual reload, deletion) isn't reflected back into the log.
 - Error categorization in `ingest_csv`'s except block is string-matching on the exception message, not on exception type — new failure modes will fall into `unknown-error` unless the matched keywords happen to appear.
+- An empty, typo'd dataset `machine_leistrtiz_1` (should be `machine_leistritz_1`) exists in the project — confirmed empty via `bq ls`, candidate for cleanup.
+- Historical failed files `PR1216-retest-2.csv` (non-numeric-data) and `-3`/`-4`/`-5.csv` (unknown-error) were never individually diagnosed — worth investigating if the same failure classes recur.
+- BigQuery/gsutil gotchas worth remembering: `rows`/`range`/`groups` are reserved words (alias as `n_rows` etc.); `bq query` without `--max_rows` silently caps at 100 rows; `gsutil` treats square brackets (e.g. a filename containing `[WIP]`) as wildcards, and with `-q` the resulting error is swallowed silently; a `CREATE OR REPLACE VIEW` should be confirmed via its `Replaced ...` output, not assumed to have succeeded.
 
 ## Session protocol — progress persistence
 
@@ -105,12 +137,13 @@ reason. A gap in the numbering is worse than a recorded dead end.
 
 ## Current state
 
-- **Last completed step:** Step 135 (see step log below).
+- **Last completed step:** Step 136 (see step log below).
+- **Note:** as of Step 136, the old numbered plan (Steps 1–128b, carried forward from `docs/chatgpt-handover.md` and `docs/session-summary-2026-08-19.md`) is no longer treated as a fixed script to resume in order — see "Source documents and precedence" above. Step numbering continues purely for traceability.
 - **In progress:**
   - Step 128b — the Looker Studio overlay chart (`elapsed_seconds_from_file_start` x-axis, `source_file_name` breakdown) is configured but not yet visually confirmed to render correctly.
   - Step 131 — data discrepancy: `PR1216-retest-7.csv` and `PR1216-retest-8.csv` are logged `SUCCESS` (88,050 rows each) in `ingestion_file_log`, but `process_parameters_long_raw` has zero rows for either. Code trace of `ingest_csv` in `leistritz-csv-ingest-raw/main.py` ruled out a log-before-load-confirmed bug (the BQ load is synchronous and blocks before the success log is written). Root cause not yet confirmed.
-- **Next action:** Get visual confirmation from Callum that the Step 128b Looker chart renders correctly. Separately, check BigQuery job history / audit logs for DELETE or table-recreate operations against `process_parameters_long_raw` around 2026-05-22–2026-05-25 to explain the Step 131 discrepancy.
-- **Half-finished / open threads:** Both items above are open — neither is blocking the other.
+- **Next action:** open — driven by the priority order above and by what's asked for next, not a fixed continuation. Candidates: visual confirmation of the Step 128b Looker chart; BigQuery audit-log check for the Step 131 discrepancy; the failure-path test from Working practices (never yet run on this pipeline); cleanup of the `machine_leistrtiz_1` typo dataset.
+- **Half-finished / open threads:** Steps 128b and 131 above are both open; neither blocks the other.
 
 ---
 
@@ -124,3 +157,4 @@ reason. A gap in the numbering is worse than a recorded dead end.
 - Step 133 — Added `docs/chatgpt-handover.md` and `docs/session-summary-2026-08-19.md`, converted from user-supplied PDF handover documents — done — 2026-08-24
 - Step 134 — Installed this session protocol (Session protocol, Current state, Step log sections) into `CLAUDE.md`, backfilling steps 129–133 for this session's prior uncommitted-to-log work — done — 2026-08-24
 - Step 135 — Simulated a fresh session start per protocol: confirmed `gcloud config get-value project` returns `notpla-machine-data` and `git status` is clean with no uncommitted changes — done — 2026-08-24
+- Step 136 — Added `docs/claude-code-setup-leistritz.md` (a third source document, written by a colleague after auditing the deployed state). Recorded its precedence over the ChatGPT handover, resolved the `run_elapsed_seconds` vs `elapsed_seconds_from_file_start` naming conflict in its favor, added its Working practices and Priority order to `CLAUDE.md`, expanded Known gaps with its environment traps and cleanup items, and clarified that the old Step 1–128b plan is a traceability log, not a mandatory script to resume in order — done — 2026-08-24
