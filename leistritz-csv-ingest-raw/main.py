@@ -14,6 +14,7 @@ PROJECT_ID = os.environ["PROJECT_ID"]
 BQ_DATASET = os.environ["BQ_DATASET"]
 BQ_TABLE = os.environ["BQ_TABLE"]
 BQ_REPORTING_TABLE = os.environ["BQ_REPORTING_TABLE"]
+BQ_RAW_FILES_TABLE = os.environ["BQ_RAW_FILES_TABLE"]
 BQ_LOG_TABLE = os.environ["BQ_LOG_TABLE"]
 
 WATCH_PREFIX = os.environ["WATCH_PREFIX"]
@@ -247,6 +248,14 @@ def load_rows_to_reporting_table(rows):
     return len(dataframe)
 
 
+def record_raw_file_present(source_file, processed_at):
+    table_id = f"{PROJECT_ID}.{BQ_DATASET}.{BQ_RAW_FILES_TABLE}"
+    row = {"source_file": source_file, "first_loaded_at": processed_at}
+    errors = bq_client.insert_rows_json(table_id, [row])
+    if errors:
+        raise RuntimeError(f"Failed to write raw_ingested_files marker: {errors}")
+
+
 def ingest_csv(event, context):
     bucket_name = event["bucket"]
     file_name = event["name"]
@@ -291,6 +300,14 @@ def ingest_csv(event, context):
             write_text_log(
                 bucket_name,
                 f"REPORTING_TABLE_LOAD_FAILED | {file_name} | {reporting_exc}"
+            )
+
+        try:
+            record_raw_file_present(file_name, rows[0]["processed_at"])
+        except Exception as marker_exc:
+            write_text_log(
+                bucket_name,
+                f"RAW_FILE_MARKER_FAILED | {file_name} | {marker_exc}"
             )
 
         destination = f"{PROCESSED_PREFIX}/{file_name.split('/')[-1]}"
