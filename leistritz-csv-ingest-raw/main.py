@@ -13,6 +13,7 @@ from google.cloud import bigquery
 PROJECT_ID = os.environ["PROJECT_ID"]
 BQ_DATASET = os.environ["BQ_DATASET"]
 BQ_TABLE = os.environ["BQ_TABLE"]
+BQ_REPORTING_TABLE = os.environ["BQ_REPORTING_TABLE"]
 BQ_LOG_TABLE = os.environ["BQ_LOG_TABLE"]
 
 WATCH_PREFIX = os.environ["WATCH_PREFIX"]
@@ -110,6 +111,7 @@ def parse_csv_to_long_rows(file_bytes, source_file):
 
     output_rows = []
     processed_at = datetime.now(timezone.utc).isoformat()
+    file_min_timestamp = None
 
     for source_row_number, row in enumerate(rows[1:], start=2):
         if len(row) < 4:
@@ -133,6 +135,9 @@ def parse_csv_to_long_rows(file_bytes, source_file):
                 f"date='{source_date}', time='{source_time}'"
             ) from exc
 
+        if file_min_timestamp is None or machine_timestamp < file_min_timestamp:
+            file_min_timestamp = machine_timestamp
+
         for col_index in active_columns:
             if col_index in [0, 1, 2]:
                 continue
@@ -155,7 +160,7 @@ def parse_csv_to_long_rows(file_bytes, source_file):
             output_rows.append({
                 "source_file": source_file,
                 "processed_at": processed_at,
-                "machine_timestamp": machine_timestamp.isoformat(),
+                "machine_timestamp": machine_timestamp,
                 "source_date": source_date,
                 "source_time": source_time,
                 "source_row_number": source_row_number,
@@ -166,16 +171,67 @@ def parse_csv_to_long_rows(file_bytes, source_file):
     if not output_rows:
         raise ValueError("No valid data rows found after applying column D rule")
 
+    # elapsed_seconds is computed here (once, per file, at ingest time) rather than
+    # via a BigQuery window function at query time -- see CLAUDE.md cost-incident notes.
+    for output_row in output_rows:
+        elapsed = int(
+            (output_row["machine_timestamp"] - file_min_timestamp).total_seconds()
+        )
+        output_row["elapsed_seconds_from_file_start"] = elapsed
+        output_row["elapsed_seconds_bucketed_10s"] = (elapsed // 10) * 10
+        output_row["machine_timestamp"] = output_row["machine_timestamp"].isoformat()
+
     return output_rows
+
+
+RAW_TABLE_COLUMNS = [
+    "source_file", "processed_at", "machine_timestamp", "source_date",
+    "source_time", "source_row_number", "parameter_name", "parameter_value",
+]
 
 
 def load_rows_to_bigquery(rows):
     table_id = f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
-    dataframe = pd.DataFrame(rows)
+    dataframe = pd.DataFrame(rows)[RAW_TABLE_COLUMNS]
 
     dataframe["processed_at"] = pd.to_datetime(dataframe["processed_at"], utc=True)
     dataframe["machine_timestamp"] = pd.to_datetime(dataframe["machine_timestamp"], utc=True)
     dataframe["source_date"] = pd.to_datetime(dataframe["source_date"]).dt.date    
+
+    job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+    )
+
+    load_job = bq_client.load_table_from_dataframe(
+        dataframe,
+        table_id,
+        job_config=job_config
+    )
+
+    load_job.result()
+    return len(dataframe)
+
+
+def load_rows_to_reporting_table(rows):
+    table_id = f"{PROJECT_ID}.{BQ_DATASET}.{BQ_REPORTING_TABLE}"
+
+    reporting_rows = [
+        {
+            "source_file_name": row["source_file"].split("/")[-1],
+            "source_date": row["source_date"],
+            "machine_timestamp": row["machine_timestamp"],
+            "source_row_number": row["source_row_number"],
+            "parameter_name": row["parameter_name"],
+            "parameter_value": row["parameter_value"],
+            "elapsed_seconds_from_file_start": row["elapsed_seconds_from_file_start"],
+            "elapsed_seconds_bucketed_10s": row["elapsed_seconds_bucketed_10s"],
+        }
+        for row in rows
+    ]
+
+    dataframe = pd.DataFrame(reporting_rows)
+    dataframe["machine_timestamp"] = pd.to_datetime(dataframe["machine_timestamp"], utc=True)
+    dataframe["source_date"] = pd.to_datetime(dataframe["source_date"]).dt.date
 
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND
@@ -225,6 +281,17 @@ def ingest_csv(event, context):
 
         rows = parse_csv_to_long_rows(file_bytes, file_name)
         rows_loaded = load_rows_to_bigquery(rows)
+
+        # Best-effort: a failure here must not affect raw-ingestion success/failure
+        # semantics (reliable ingestion outranks reporting -- see CLAUDE.md priority
+        # order). A gap here is recoverable by re-deriving from the raw table.
+        try:
+            load_rows_to_reporting_table(rows)
+        except Exception as reporting_exc:
+            write_text_log(
+                bucket_name,
+                f"REPORTING_TABLE_LOAD_FAILED | {file_name} | {reporting_exc}"
+            )
 
         destination = f"{PROCESSED_PREFIX}/{file_name.split('/')[-1]}"
         move_blob(bucket_name, file_name, destination)
