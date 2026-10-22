@@ -10,6 +10,14 @@ already_done = set() if REPROCESS_ALL else {
     os.path.splitext(name)[0] for name in os.listdir(output_folder) if name.endswith('.csv')
 }
 
+# Copies of other exports in the bucket -- skipped so the same run doesn't appear twice on the dashboard
+EXCLUDE = {
+    '240403R Ben Jones & Broadway-3',     # identical to ...Broadway-2
+    'AM AA AA AB 241015 AP PR 0083(1)',   # identical to ...PR 0083
+    'Untitled spreadsheet',               # trimmed copy of 240403R Ben Jones & Broadway-2, timestamps misaligned
+    '240712F - 990',                      # trimmed copy of 240712F - 990(1), timestamps misaligned
+}
+
 dfs = {}
 dfs_range = {}
 columns = {}
@@ -23,7 +31,7 @@ for blob in bucket.list_blobs():
     file_name = parts[0]
     if len(parts) > 2:
       dfs_range[file_name] = [parts[1], parts[2]]
-    if file_name in already_done:
+    if file_name in already_done or file_name in EXCLUDE:
       skipped += 1
       continue
     already_done.add(file_name)
@@ -36,7 +44,7 @@ for blob in bucket.list_blobs():
       dfs[file_name] = df
       columns[file_name] = df.columns.tolist()
 
-print(f"{len(dfs)} new file(s) to process, {skipped} already in Drive and skipped.")
+print(f"{len(dfs)} new file(s) to process, {skipped} already in Drive or excluded, and skipped.")
 
 # ===================== CELL 2: clean and write =====================
 # Machine column -> English name, in output order. Date/Time come from TIME.
