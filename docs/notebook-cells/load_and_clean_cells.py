@@ -16,6 +16,7 @@ EXCLUDE = {
     'AM AA AA AB 241015 AP PR 0083(1)',   # identical to ...PR 0083
     'Untitled spreadsheet',               # trimmed copy of 240403R Ben Jones & Broadway-2, timestamps misaligned
     '240712F - 990',                      # trimmed copy of 240712F - 990(1), timestamps misaligned
+    'PR1422',                             # byte-identical to PR1412, uploaded under the wrong run number
 }
 
 dfs = {}
