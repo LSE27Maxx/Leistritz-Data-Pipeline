@@ -48,6 +48,7 @@ def sync_drive_to_gcs(request):
 
     copied = []
     skipped = []
+    failed = []
     files = []
 
     page_token = None
@@ -78,31 +79,40 @@ def sync_drive_to_gcs(request):
             skipped.append(f"{file_name}: already synced")
             continue
 
-        request_download = drive_service.files().get_media(
-            fileId=file_id,
-            supportsAllDrives=True,
-        )
+        # One bad file (e.g. Drive 403 cannotDownloadFile) must not stop the
+        # rest of the folder syncing. It stays unmarked, so it's retried next run.
+        try:
+            request_download = drive_service.files().get_media(
+                fileId=file_id,
+                supportsAllDrives=True,
+            )
 
-        with tempfile.NamedTemporaryFile() as tmp:
-            downloader = MediaIoBaseDownload(tmp, request_download)
+            with tempfile.NamedTemporaryFile() as tmp:
+                downloader = MediaIoBaseDownload(tmp, request_download)
 
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
 
-            tmp.seek(0)
+                tmp.seek(0)
 
-            destination_blob = bucket.blob(f"{GCS_WATCH_PREFIX}/{file_name}")
-            destination_blob.upload_from_file(tmp, content_type="text/csv")
+                destination_blob = bucket.blob(f"{GCS_WATCH_PREFIX}/{file_name}")
+                destination_blob.upload_from_file(tmp, content_type="text/csv")
 
-        mark_synced(bucket, file_id, file_name)
-        copied.append(file_name)
+            mark_synced(bucket, file_id, file_name)
+            copied.append(file_name)
+        except Exception as e:
+            print(f"SYNC_FILE_FAILED | {file_id} | {file_name} | {e!r}", flush=True)
+            failed.append(f"{file_name} ({file_id}): {e}")
 
     message = {
         "copied": copied,
         "skipped": skipped,
+        "failed": failed,
         "copied_count": len(copied),
         "skipped_count": len(skipped),
+        "failed_count": len(failed),
     }
 
-    return message, 200
+    # Non-200 so Cloud Scheduler records the run as failed and it's visible.
+    return message, 500 if failed else 200
